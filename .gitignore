@@ -1,0 +1,21 @@
+# --- FRONTEND (React) ---
+eps-frontend/node_modules/
+eps-frontend/dist/
+eps-frontend/.env
+eps-frontend/.env.local
+
+# --- BACKEND (Python/FastAPI) ---
+eps-backend/venv/
+eps-backend/.venv*/
+eps-backend/__pycache__/
+eps-backend/*.pyc
+eps-backend/.env
+eps-backend/uploads/
+
+# --- SISTEMA Y EDITORES ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.log
