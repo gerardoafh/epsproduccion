@@ -1,16 +1,12 @@
-import { useState } from 'react'
-import { useFetch } from './App'
+import { useState, useMemo } from 'react';
+import { useFetch } from './App';
 
 const LINEA_COLOR = {
-  R1: '#3B82F6',
-  R2: '#10B981',
-  R3: '#F59E0B',
-  WP: '#8B5CF6',
-  BOSCH: '#EC4899',
-  EXTRA: '#6B7280'
-}
+  R1: '#3B82F6', R2: '#10B981', R3: '#F59E0B',
+  WP: '#8B5CF6', BOSCH: '#EC4899', OVEN: '#F97316', 
+  SVC: '#6B7280', EXT: '#ef4444'
+};
 
-// Funciones Helper para evitar bugs de zona horaria (Timezone Agnostic)
 const formatearFechaLocal = (date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -18,7 +14,7 @@ const formatearFechaLocal = (date) => {
   return `${y}-${m}-${d}`;
 };
 
-function obtenerLunesDeSemanaISO(w, y = 2026) {
+function obtenerLunesDeSemanaISO(w, y = new Date().getFullYear()) {
   const simple = new Date(y, 0, 1 + (w - 1) * 7);
   const dow = simple.getDay();
   const ISOweekStart = new Date(simple);
@@ -30,222 +26,161 @@ function obtenerLunesDeSemanaISO(w, y = 2026) {
   return formatearFechaLocal(ISOweekStart);
 }
 
-const Tag = ({ linea }) => {
-  const bg = LINEA_COLOR[linea] ? `${LINEA_COLOR[linea]}20` : '#242a38'
-  const color = LINEA_COLOR[linea] || 'var(--muted)'
-  return <span className="tag" style={{ background: bg, color }}>{linea}</span>
-}
-
-const ErrorBox = ({ message }) => (
-  <div style={{ padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid var(--red)', borderRadius: 4, color: 'var(--red)', fontFamily: 'var(--mono)', fontSize: 12, marginBottom: 16 }}>
-    ⚠ Error de Conexión: {message}
-  </div>
-)
-
-const LoadingRows = ({ cols, rows = 5 }) => (
-  <>
-    {Array.from({ length: rows }).map((_, i) => (
-      <tr key={i} style={{ opacity: .5 }}>
-        <td colSpan={cols} style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 11 }}>
-          Solicitando registros de producción a PostgreSQL...
-        </td>
-      </tr>
-    ))}
-  </>
-)
-
-const fmt = n => n != null ? Number(n).toLocaleString('es-MX') : '—'
+const fmt = (n) => (n != null ? Number(n).toLocaleString("es-MX") : "—");
 
 export default function PlanSemanal() {
-  const [lunes, setLunes] = useState(() => {
-    const today = new Date();
-    const day = today.getDay() || 7;
-    const diff = today.getDate() - day + 1;
-    const date = new Date(today.setDate(diff));
-    return formatearFechaLocal(date);
+  const currentWeek = 18; // Puedes hacerlo dinámico después
+  const [semana, setSemana] = useState(currentWeek);
+  const [filtroLinea, setFiltroLinea] = useState("TODOS");
+  const [busqueda, setBusqueda] = useState("");
+
+  const lunes = obtenerLunesDeSemanaISO(semana);
+  const dLunes = new Date(lunes + "T00:00:00");
+  const domingo = new Date(dLunes);
+  domingo.setDate(dLunes.getDate() + 6);
+  const strDomingo = formatearFechaLocal(domingo);
+
+  const query = new URLSearchParams({
+    fecha_inicio: lunes,
+    fecha_fin: strDomingo
   });
+  if (filtroLinea !== "TODOS") query.append("linea", filtroLinea);
 
-  const [filtroLinea, setFiltroLinea] = useState('TODOS');
-  const [busqueda, setBusqueda] = useState('');
+  const { data: planRaw, loading } = useFetch(`/plan/agrupado/?${query.toString()}`);
+  const { data: lineasDisponibles } = useFetch("/bom/lineas/");
 
-  // Consultar semanas dinámicas con datos en el servidor
-  const { data: semanasDisponibles } = useFetch('/plan/semanas/');
+  // Generamos los 7 días de la semana actual
+  const fechas = useMemo(() => {
+    const f = [];
+    const cur = new Date(dLunes);
+    for (let i = 0; i < 7; i++) {
+      f.push(formatearFechaLocal(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return f;
+  }, [lunes]);
 
-  const d = new Date(lunes + 'T12:00:00');
-  const fin = new Date(d);
-  fin.setDate(d.getDate() + 6);
-  const fechaFinStr = formatearFechaLocal(fin);
+  // Filtrado local por búsqueda
+  const filtrado = useMemo(() => {
+    if (!planRaw) return [];
+    return planRaw.filter(r => 
+      busqueda === "" ||
+      r.no_parte?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      r.descripcion?.toLowerCase().includes(busqueda.toLowerCase()) ||
+      r.modelo?.toLowerCase().includes(busqueda.toLowerCase())
+    );
+  }, [planRaw, busqueda]);
 
-  const labelSemana = `Semana del ${d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} al ${fin.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  // EXTRACCIÓN DINÁMICA DE LÍNEAS BASADA EN BOMCW
+  const lineas = useMemo(() => {
+    if (!filtrado) return [];
+    // Recolectamos todas las líneas únicas resultantes
+    const lineasUnicas = [...new Set(filtrado.map(r => r.linea || 'EXT'))];
+    return lineasUnicas.sort();
+  }, [filtrado]);
 
-  const url = `/plan/agrupado/?fecha_inicio=${lunes}&fecha_fin=${fechaFinStr}${filtroLinea !== 'TODOS' ? `&linea=${filtroLinea}` : ''}`;
-  const { data: planRaw, loading, error, refetch } = useFetch(url, [lunes, filtroLinea]);
-
-  // Generar el arreglo de las columnas de días
-  const fechas = [];
-  const curr = new Date(d);
-  while (curr <= fin) {
-    fechas.push(formatearFechaLocal(curr));
-    curr.setDate(curr.getDate() + 1);
-  }
-
-  const diaLabel = (iso) => {
-    const [ , , dd] = iso.split('-');
-    const d = new Date(iso + 'T12:00:00');
-    return `${['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d.getDay()]} ${dd}`;
-  };
-
-  const moverSemana = (dias) => {
-    const nueva = new Date(lunes + 'T12:00:00');
-    nueva.setDate(nueva.getDate() + dias);
-    setLunes(formatearFechaLocal(nueva));
-  };
-
-  const filtrado = (planRaw || []).filter(r =>
-    busqueda === '' ||
-    r.no_parte?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    r.modelo?.toLowerCase().includes(busqueda.toLowerCase())
-  );
-
-  const lineas = ['R1', 'R2', 'R3', 'WP', 'BOSCH', 'EXTRA'];
+  const lineasLista = lineasDisponibles && lineasDisponibles.length > 0 
+    ? lineasDisponibles 
+    : ["R1", "R2", "R3", "WP", "BOSCH", "OVEN", "SVC", "EXT"];
 
   return (
-    <div>
-      {/* Barra de Navegación y Filtros de Tiempo */}
-      <div className="tabs" style={{ alignItems: 'center', gap: 16, paddingBottom: 12, flexWrap: 'wrap' }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => moverSemana(-7)}>◀ Ant.</button>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{labelSemana}</span>
-        <button className="btn btn-ghost btn-sm" onClick={() => moverSemana(7)}>Sig. ▶</button>
-        
-        {/* Selector de semanas con datos reales */}
-        {semanasDisponibles && semanasDisponibles.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12 }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>Saltar a:</span>
-            <select 
-              className="field-input" 
-              style={{ padding: '4px 8px', fontSize: 11, width: 'auto', cursor: 'pointer', height: '28px' }}
-              onChange={(e) => {
-                if (e.target.value) {
-                  setLunes(obtenerLunesDeSemanaISO(parseInt(e.target.value)));
-                }
-              }}
-              defaultValue=""
-            >
-              <option value="" disabled>— Semanas con registros —</option>
-              {semanasDisponibles.map(sem => (
-                <option key={sem} value={sem}>Semana W{String(sem).padStart(2, '0')}</option>
-              ))}
-            </select>
+    <div className="wrap">
+      <div className="topbar">
+        <div>
+          <h2 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-h)' }}>Plan de Inyección</h2>
+          <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
+            Semana {semana} ({lunes} al {strDomingo}) | <span style={{color: "var(--accent)"}}>Líneas según Ficha Técnica (BOMCW)</span>
           </div>
-        )}
-
-        <input
-          type="date"
-          value={lunes}
-          onChange={e => {
-            if (!e.target.value) return;
-            const date = new Date(e.target.value + 'T12:00:00');
-            const day = date.getDay() || 7;
-            date.setDate(date.getDate() - day + 1);
-            setLunes(formatearFechaLocal(date));
-          }}
-          style={{ marginLeft: 16, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 3, padding: '5px 10px', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 11, outline: 'none', cursor: 'pointer', height: '28px' }}
-        />
-        <button className="btn btn-primary btn-sm" onClick={refetch} style={{ marginLeft: 'auto' }}>↻ Actualizar</button>
-      </div>
-
-      {/* Caja de Búsqueda y Filtros por Línea */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div className="filter-bar" style={{ marginBottom: 0 }}>
-          {['TODOS', 'R1', 'R2', 'R3', 'WP', 'BOSCH', 'EXTRA'].map(ln => (
-            <button key={ln} className={`filter-btn ${filtroLinea === ln ? 'active' : ''}`} onClick={() => setFiltroLinea(ln)}>{ln}</button>
-          ))}
         </div>
-        <input className="search-box" placeholder="Buscar parte o modelo..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={() => setSemana(s => s - 1)}>◀ Ant</button>
+          <button className="btn btn-primary" onClick={() => setSemana(currentWeek)}>Semana Actual</button>
+          <button className="btn btn-ghost" onClick={() => setSemana(s => s + 1)}>Sig ▶</button>
+        </div>
       </div>
 
-      {error && <ErrorBox message={error} />}
+      {/* BARRA DE FILTROS Y BÚSQUEDA */}
+      <div style={{ display: "flex", gap: 12, marginTop: 20, marginBottom: 16, flexWrap: "wrap" }}>
+        <select
+          value={filtroLinea}
+          onChange={(e) => setFiltroLinea(e.target.value)}
+          style={{ 
+            padding: "8px 12px", borderRadius: "4px", border: "1px solid var(--border)", 
+            background: "var(--surface)", color: "var(--text)", cursor: "pointer" 
+          }}
+        >
+          <option value="TODOS">Todas las Líneas</option>
+          {lineasLista.map(ln => <option key={ln} value={ln}>{ln}</option>)}
+        </select>
+        <input 
+          className="search-box" 
+          placeholder="Buscar por No. Parte o Descripción..." 
+          value={busqueda} 
+          onChange={e => setBusqueda(e.target.value)} 
+        />
+      </div>
 
-      {/* Tabla Principal — Cambiada a className="tbl" para heredar estilos CSS */}
-      <div className="table-wrap" style={{ overflowX: 'auto' }}>
-        <table className="tbl" style={{ minWidth: 1100 }}>
-          <thead>
+      <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 12 }}>
+          <thead style={{ background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
             <tr>
-              <th>Línea</th>
-              <th style={{ minWidth: 120 }}>No. Parte</th>
-              <th style={{ minWidth: 160 }}>Modelo / Descripción</th>
-              {fechas.map(f => <th key={f} style={{ textAlign: 'right' }}>{diaLabel(f)}</th>)}
-              <th style={{ textAlign: 'right', color: 'var(--accent)' }}>Total</th>
+              <th style={{ padding: '12px 16px', color: 'var(--muted)' }}>Línea</th>
+              <th style={{ padding: '12px 16px', color: 'var(--muted)' }}>No. Parte</th>
+              <th style={{ padding: '12px 16px', color: 'var(--muted)' }}>Descripción</th>
+              {fechas.map(f => (
+                <th key={f} style={{ padding: '12px 16px', color: 'var(--muted)', textAlign: 'right' }}>
+                  {f.slice(5)} {/* Muestra MM-DD */}
+                </th>
+              ))}
+              <th style={{ padding: '12px 16px', color: 'var(--accent)', textAlign: 'right' }}>Total Sem.</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <LoadingRows cols={4 + fechas.length} rows={6} />
-            ) : filtrado.length === 0 ? (
-                <tr>
-                  <td colSpan={4 + fechas.length}>
-                    <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--muted)' }}>
-                      <div style={{ fontSize: 24, marginBottom: 8, opacity: .3 }}>▤</div>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Sin datos de plan para esta semana</div>
-                      <div style={{ fontSize: 11, marginTop: 4, opacity: 0.7, marginBottom: 14 }}>
-                        El rango visualizado no coincide con las fechas asignadas durante la importación del Excel.
-                      </div>
-                      
-                      {semanasDisponibles && semanasDisponibles.length > 0 && (
-                        <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 4, display: 'inline-block', border: '1px solid var(--border)' }}>
-                          <span style={{ fontSize: 11, display: 'block', marginBottom: 8, color: 'var(--text)' }}>
-                            Selecciona una semana con datos válidos en PostgreSQL:
-                          </span>
-                          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                            {semanasDisponibles.map(sem => (
-                              <button 
-                                key={sem} 
-                                className="btn btn-primary btn-sm"
-                                onClick={() => setLunes(obtenerLunesDeSemanaISO(sem))}
-                              >
-                                Abrir Semana W{String(sem).padStart(2, '0')}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filtrado.map(r => (
-                  <tr key={r.parte_id}>
-                    <td><Tag linea={r.linea || '—'} /></td>
-                    <td className="mono" style={{ fontSize: 11, color: 'var(--accent)' }}>{r.no_parte}</td>
-                    <td style={{ color: 'var(--text)', fontSize: 11 }}>{r.descripcion || r.modelo || '—'}</td>
+              <tr><td colSpan={11} style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>Cargando plan de la semana...</td></tr>
+            ) : (!filtrado || filtrado.length === 0) ? (
+              <tr><td colSpan={11} style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>No hay programación en la pestaña CW PLAN para esta semana.</td></tr>
+            ) : (
+              lineas.map(ln => {
+                const piezasDeLinea = filtrado.filter(r => (r.linea || 'EXT') === ln);
+                return piezasDeLinea.map((r, idx) => (
+                  <tr key={`${ln}-${r.parte_id}`} style={{ borderBottom: '1px solid var(--border2)', background: 'var(--bg)' }}>
+                    
+                    {/* Renderizamos la línea solo en la primera fila del grupo para que se vea como un bloque */}
+                    {idx === 0 ? (
+                      <td rowSpan={piezasDeLinea.length} style={{ padding: '12px 16px', borderRight: '1px solid var(--border2)', verticalAlign: 'top', background: 'var(--surface)' }}>
+                        <span style={{ 
+                          background: `${LINEA_COLOR[ln] || '#6B7280'}20`, 
+                          color: LINEA_COLOR[ln] || '#fff', 
+                          padding: '4px 8px', borderRadius: 4, fontWeight: 600, fontSize: 11 
+                        }}>
+                          {ln}
+                        </span>
+                      </td>
+                    ) : null}
+
+                    <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-h)' }}>{r.no_parte}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text)', fontSize: 11 }}>{r.descripcion || r.modelo || '—'}</td>
+                    
+                    {/* Renderizamos las cantidades diarias */}
                     {fechas.map(f => {
                       const v = r.dias?.[f] || 0;
-                      return <td key={f} className="mono" style={{ textAlign: 'right', color: v === 0 ? 'var(--muted)' : 'var(--text)', opacity: v === 0 ? 0.4 : 1 }}>{v === 0 ? '—' : fmt(v)}</td>;
+                      return (
+                        <td key={f} className="mono" style={{ padding: '12px 16px', textAlign: 'right', color: v === 0 ? 'var(--muted)' : 'var(--text)' }}>
+                          {v === 0 ? '—' : fmt(v)}
+                        </td>
+                      );
                     })}
-                    <td className="mono" style={{ textAlign: 'right', fontWeight: 600, color: 'var(--accent)' }}>{fmt(r.total)}</td>
+                    <td className="mono" style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--accent)' }}>
+                      {fmt(r.total)}
+                    </td>
                   </tr>
-                ))
-              )}
+                ));
+              })
+            )}
           </tbody>
         </table>
       </div>
-
-      {/* Resumen de Carga por Línea inferior */}
-      {!loading && planRaw && planRaw.length > 0 && (
-        <div className="kpi-grid" style={{ marginTop: 16 }}>
-          {lineas.map(ln => {
-            const rows = planRaw.filter(r => r.linea === ln);
-            const total = rows.reduce((a, r) => a + r.total, 0);
-            return (
-              <div key={ln} className="kpi" style={{ '--kpi-color': LINEA_COLOR[ln] || '#6B7280' }}>
-                <div className="kpi-label">Línea {ln}</div>
-                <div className="kpi-value" style={{ color: LINEA_COLOR[ln] }}>{(total / 1000).toFixed(1)}K</div>
-                <div className="kpi-sub">{rows.length} referencias</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

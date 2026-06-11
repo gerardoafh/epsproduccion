@@ -102,92 +102,77 @@ def parse_inventario(path: str) -> list[dict]:
         except Exception: continue
     return registros
 
-# ─── PLAN DE PRODUCCIÓN MULTI-HOJA ───────────────────────────────────────────
+# ─── PLAN DE PRODUCCIÓN (CW PLAN) ─────────────────────────────────────────────
 def parse_plan(path: str, fecha_plan: Optional[date] = None) -> list[dict]:
     engine = _engine_for(path)
-    if fecha_plan is None: fecha_plan = date.today()
+    # Leemos específicamente la pestaña general de la planta
+    df = _read_sheet(path, "CW PLAN", engine)
+    if df is None: 
+        return []
 
-    hojas_de_plan = [
-        "Ref.PLAN", 
-        "CW PLAN", 
-        "Oven PLAN", 
-        "WP Plan", 
-        "BOSCH Plan", 
-        "Extra Plan", 
-        "EMB PLAN"
-    ]
-    plan_unificado = {}
-    
-    for hoja in hojas_de_plan:
-        df = _read_sheet(path, hoja, engine)
-        if df is None: continue
+    plan_data = []
+    fecha_row_idx = -1
+    col_fechas = {}
+    col_parte = -1
+
+    # 1. Modo Cazador: Escanear hasta la columna BQ (o donde estén) para hallar las fechas
+    for i, row in df.iterrows():
+        fechas_en_fila = {}
+        for col_idx, val in row.items():
+            s_val = str(val).strip()
             
-        header_row_idx = None
-        col_no_parte_idx = None
-        
-        for i, row in df.iterrows():
-            for c_idx, val in enumerate(row):
-                v_str = str(val).strip().upper()
-                if v_str in ("NO. PARTE", "NO.PARTE", "P/NO"):
-                    header_row_idx = i
-                    col_no_parte_idx = c_idx
-                    break
-            if header_row_idx is not None: break
-                
-        if header_row_idx is None or col_no_parte_idx is None: continue
-
-        header = list(df.iloc[header_row_idx])
-        fechas_idx = []
-        dias_encontrados = 0
-        
-        for i, val in enumerate(header):
-            if pd.isna(val) or i <= col_no_parte_idx: continue
-            val_str = str(val).strip().upper()
-            if "TOTAL" in val_str: continue 
-                
-            fecha_detectada = None
-            if hasattr(val, 'date') and callable(val.date):
-                fecha_detectada = val.date()
-            elif isinstance(val, pd.Timestamp):
-                fecha_detectada = val.date()
-            elif isinstance(val, (int, float)) and 40000 < val < 50000:
-                try: fecha_detectada = pd.to_datetime(val, unit='D', origin='1899-12-30').date()
-                except Exception: pass
-            elif isinstance(val, str):
-                if re.match(r"\d{4}-\d{2}-\d{2}", val):
-                    fecha_detectada = date.fromisoformat(val[:10])
-                elif len(val_str) <= 10 and any(c.isdigit() for c in val_str) and "INV" not in val_str:
-                    fecha_detectada = fecha_plan + timedelta(days=dias_encontrados)
+            # Detectamos si la celda es una fecha (ej. 2026-05-04)
+            if s_val.startswith('202') and len(s_val) == 10 and s_val.count('-') == 2:
+                fechas_en_fila[col_idx] = s_val
             
-            if fecha_detectada:
-                fechas_idx.append((i, fecha_detectada))
-                dias_encontrados += 1
+            # Aprovechamos para cazar la columna donde viene el número de parte
+            if 'PARTE' in str(s_val).upper() or '품번' in str(s_val):
+                col_parte = col_idx
 
-        for _, row in df.iloc[header_row_idx + 1:].iterrows():
-            no_parte = str(row.iloc[col_no_parte_idx]).strip() if pd.notna(row.iloc[col_no_parte_idx]) else None
-            if not no_parte or no_parte in ("nan", "P/No", "NO. PARTE", "None"): continue
+        # Si encontramos al menos 3 fechas seguidas, es nuestra fila cabecera
+        if len(fechas_en_fila) > 3:
+            fecha_row_idx = i
+            col_fechas = fechas_en_fila
+            break
+
+    if fecha_row_idx == -1:
+        return []
+        
+    # Si por alguna razón no detectó el título de "Parte", usamos la columna E (índice 4) por defecto
+    if col_parte == -1:
+        col_parte = 4
+
+    # 2. Extracción de Cantidades cruzando Pieza vs Fecha
+    for i in range(fecha_row_idx + 1, len(df)):
+        row = df.iloc[i]
+        raw_parte = row.get(col_parte, '')
+        if pd.isna(raw_parte): continue
+        
+        no_parte = str(raw_parte).strip()
+        if no_parte.endswith('.0'): no_parte = no_parte[:-2]
+            
+        if not no_parte or no_parte.lower() in ('nan', 'none', '') or 'PARTE' in no_parte.upper():
+            continue
+
+        for col_idx, fecha_str in col_fechas.items():
+            val = row.get(col_idx)
+            try:
+                cantidad = int(float(str(val).replace(',', '')))
+            except:
+                cantidad = 0
+
+            # Solo importamos si hay piezas programadas para ese día
+            if cantidad > 0:
+                dt_obj = date.fromisoformat(fecha_str)
+                plan_data.append({
+                    "no_parte": no_parte,
+                    "fecha": dt_obj,
+                    "cantidad_plan": cantidad,
+                    "semana": _semana_iso(dt_obj)
+                })
                 
-            for col_i, fecha in fechas_idx:
-                try:
-                    qty_raw = row.iloc[col_i]
-                    if pd.isna(qty_raw): continue
-                    qty_str = str(qty_raw).strip()
-                    if qty_str == "" or qty_str == "-": continue
-                    qty = int(float(qty_raw))
-                    if qty > 0:
-                        llave = (no_parte, fecha)
-                        if llave not in plan_unificado:
-                            plan_unificado[llave] = {
-                                "no_parte": no_parte, "fecha": fecha,
-                                "cantidad_plan": qty, "semana": _semana_iso(fecha),
-                                "año": fecha.year,
-                            }
-                        else:
-                            plan_unificado[llave]["cantidad_plan"] += qty
-                except Exception: continue
-
-    logger.info(f"PLAN CONSOLIDADO: {len(plan_unificado.values())} registros extraídos.")
-    return list(plan_unificado.values())
+    logger.info(f"PLAN SEMANAL: {len(plan_data)} días de producción extraídos de CW PLAN.")
+    return plan_data
 
 # ─── CAMBIOS DE MOLDE ─────────────────────────────────────────────────────────
 def parse_cambios(path: str, fecha_plan: date) -> list[dict]:
