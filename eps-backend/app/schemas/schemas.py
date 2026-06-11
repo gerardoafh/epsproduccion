@@ -25,16 +25,34 @@ class ParteOut(ParteBase):
 # ── BOM ────────────────────────────────────────────────────────────────────
 class BOMItemOut(BaseModel):
     id: int
-    linea: Optional[str]
-    modelo: Optional[str]
-    pt_parte_id: int
-    pt_desc: Optional[str]
-    comp_parte_id: int
-    comp_desc: Optional[str]
+    linea: Optional[str] = None
+    modelo: Optional[str] = None
+    pt_parte_id: Optional[int] = None
+    pt_desc: Optional[str] = None
+    comp_parte_id: Optional[int] = None
+    comp_desc: Optional[str] = None
     qty_bom: float
-    id1: Optional[str]
+    id1: Optional[str] = None
     pt_no_parte: Optional[str] = None
     comp_no_parte: Optional[str] = None
+    
+    # --- NUEVOS CAMPOS DE FICHA TÉCNICA (Desde Parte) ---
+    molde: Optional[str] = None
+    ciclo: Optional[float] = None
+    cavidades: Optional[int] = None
+    peso_kg: Optional[float] = None
+    resina: Optional[str] = None
+    densidad: Optional[float] = None
+    
+    # ─── ¡NUEVOS CAMPOS A EXPORTAR! ───
+    cliente: Optional[str] = None
+    id2: Optional[str] = None
+    peso_seco: Optional[float] = None
+    peso_humedo: Optional[float] = None
+    material_usd: Optional[float] = None
+    total_usd: Optional[float] = None
+    equipo_type: Optional[str] = None
+
     class Config:
         from_attributes = True
 

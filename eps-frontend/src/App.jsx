@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import PlanCaptura from "./PlanCaptura";
 import PlanSemanal from "./PlanSemanal";
+import BomInternoUpload from "./BomInternoUpload";
+import BOM from "./BOM";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const API = "http://localhost:8000";
@@ -349,9 +351,15 @@ function Dashboard({ onRefresh }) {
       </div>
 
       {showUpload && (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4, padding: 20, marginBottom: 24 }}>
-          <div className="section-header"><div className="section-title">Importar archivo Excel</div><div className="section-line" /></div>
-          <UploadPanel onSuccess={handleImportSuccess} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px", marginBottom: "24px" }}>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4, padding: 20 }}>
+            <div className="section-header"><div className="section-title">Importar Plan de Producción</div><div className="section-line" /></div>
+            <UploadPanel onSuccess={handleImportSuccess} />
+          </div>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4, padding: 20 }}>
+            <div className="section-header"><div className="section-title">Actualizar Ficha Técnica (BOM)</div><div className="section-line" /></div>
+            <BomInternoUpload onSuccess={handleImportSuccess} />
+          </div>
         </div>
       )}
 
@@ -697,92 +705,6 @@ function CambiosMolde() {
           ))}
         </>
       )}
-    </div>
-  );
-}
-
-// ─── BOM ─────────────────────────────────────────────────────────────────────
-function BOM() {
-  const [filtroLinea, setFiltroLinea] = useState("TODOS");
-  const [busqueda, setBusqueda] = useState("");
-
-  const params = new URLSearchParams({ limit: "300" });
-  if (filtroLinea !== "TODOS") params.set("linea", filtroLinea);
-  if (busqueda) params.set("busqueda", busqueda);
-
-  const { data, loading, error } = useFetch(`/bom/?${params}`, [filtroLinea, busqueda]);
-  const { data: lineas } = useFetch("/bom/lineas/");
-
-  const ptUnicos = new Set((data || []).map(r => r.pt_parte_id)).size;
-  const compUnicos = new Set((data || []).map(r => r.comp_parte_id)).size;
-  const lineaUnicos = new Set((data || []).map(r => r.linea).filter(Boolean)).size;
-
-  return (
-    <div>
-      <div className="kpi-grid">
-        <div className="kpi" style={{"--kpi-color":"#3B82F6"}}>
-          <div className="kpi-label">Partes terminadas</div>
-          <div className="kpi-value">{loading ? "—" : ptUnicos}</div>
-          <div className="kpi-sub">productos únicos PT</div>
-        </div>
-        <div className="kpi" style={{"--kpi-color":"#10B981"}}>
-          <div className="kpi-label">Componentes EPS</div>
-          <div className="kpi-value">{loading ? "—" : compUnicos}</div>
-          <div className="kpi-sub">componentes únicos</div>
-        </div>
-        <div className="kpi" style={{"--kpi-color":"#8B5CF6"}}>
-          <div className="kpi-label">Líneas en BOM</div>
-          <div className="kpi-value">{loading ? "—" : lineaUnicos}</div>
-          <div className="kpi-sub">R1, R2, WP, OVEN, SVC...</div>
-        </div>
-        <div className="kpi" style={{"--kpi-color":"#F59E0B"}}>
-          <div className="kpi-label">Registros totales</div>
-          <div className="kpi-value">{loading ? "—" : (data?.length ?? 0)}</div>
-          <div className="kpi-sub">en BOM activo</div>
-        </div>
-      </div>
-
-      {error && <ErrorBox message={error} />}
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div className="filter-bar" style={{ marginBottom: 0 }}>
-          {["TODOS", ...(lineas || [])].map(ln => (
-            <button key={ln} className={`filter-btn ${filtroLinea === ln ? "active" : ""}`} onClick={() => setFiltroLinea(ln)}>{ln}</button>
-          ))}
-        </div>
-        <input className="search-box" placeholder="Buscar parte, descripción o modelo..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-      </div>
-
-      <div className="table-wrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Línea</th><th>Modelo</th><th>No. Parte PT</th><th>Descripción PT</th>
-              <th>No. Parte Comp.</th><th>Descripción Comp.</th>
-              <th style={{textAlign:"right"}}>Qty</th><th>Tipo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? <LoadingRows cols={8} rows={8} />
-              : !data || data.length === 0
-                ? <tr><td colSpan={8}><EmptyState icon="≡" text="Sin datos de BOM" sub="Importa un Excel para cargar la lista de materiales" /></td></tr>
-                : data.map((r, i) => (
-                  <tr key={i}>
-                    <td><Tag linea={r.linea || "—"} /></td>
-                    <td style={{color:"var(--muted)",fontSize:11}}>{r.modelo || "—"}</td>
-                    <td className="mono" style={{fontSize:10}}>{r.pt_no_parte || r.pt_parte_id}</td>
-                    <td style={{fontSize:11}}>{r.pt_desc}</td>
-                    <td className="mono" style={{fontSize:10,color:"var(--accent)"}}>{r.comp_no_parte || r.comp_parte_id}</td>
-                    <td style={{fontSize:11}}>{r.comp_desc}</td>
-                    <td className="num">{r.qty_bom}</td>
-                    <td><span className="tag" style={{background:"rgba(139,92,246,.15)",color:"#A78BFA"}}>{r.id1 || "EPS"}</span></td>
-                  </tr>
-                ))
-            }
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

@@ -342,6 +342,91 @@ def parse_cortes(path: str, fecha_plan: date) -> list[dict]:
     return registros
 
 
+# ─── NUEVO: PARSE BOM INTERNO (FICHA TÉCNICA) ─────────────────────────────────
+def parse_bom_interno(file_path_or_bytes):
+    try:
+        df = pd.read_excel(file_path_or_bytes, dtype=str)
+    except Exception:
+        if hasattr(file_path_or_bytes, 'seek'): file_path_or_bytes.seek(0)
+        df = pd.read_csv(file_path_or_bytes, dtype=str)
+
+    if df.empty: 
+        return []
+
+    # 1. Normalizamos cabeceras: todo a mayúsculas y sin espacios ocultos a los lados
+    df.columns = [str(c).strip().upper() for c in df.columns]
+
+    # 2. Búsqueda dinámica tipo "Cazador" (Si la columna cambia un poco, la encuentra igual)
+    col_parte   = next((c for c in df.columns if 'PARTE' in c or '품번' in c), 'NO. PARTE')
+    col_desc    = next((c for c in df.columns if 'DESC' in c or '품명' in c), 'DESCRIPCION')
+    col_line    = next((c for c in df.columns if 'LINE' in c), 'LINE')
+    col_model   = next((c for c in df.columns if 'MODEL' in c), 'MODEL')
+    col_cliente = next((c for c in df.columns if 'CLIENT' in c), 'CLIENTE')
+    col_id1     = next((c for c in df.columns if 'ID1' in c), 'ID1')
+    col_id2     = next((c for c in df.columns if 'ID2' in c), 'ID2')
+    col_resina  = next((c for c in df.columns if 'RESIN' in c), 'RESIN GRADE')
+    col_dens    = next((c for c in df.columns if 'DENSIDAD' in c or '비중' in c), 'DENSIDAD')
+    col_seco    = next((c for c in df.columns if 'SECO' in c), 'PESO SECO(KG)')
+    col_humedo  = next((c for c in df.columns if 'HUMEDO' in c or 'HÚMEDO' in c), 'PESO HUMEDO(KG)')
+    col_mat     = next((c for c in df.columns if 'MATERIAL' in c), 'MATERIAL $')
+    col_tot     = next((c for c in df.columns if 'TOTAL' in c), 'TOTAL $')
+    col_type    = next((c for c in df.columns if 'TYPE' in c or 'TIPO' in c), 'TYPE')
+    col_mold    = next((c for c in df.columns if 'MOLD' in c), 'MOLD')
+    col_cav     = next((c for c in df.columns if 'CAV' in c), 'CAV.')
+    col_ciclo   = next((c for c in df.columns if 'CICLO' in c or 'C/T' in c), 'CICLO')
+
+    partes_ficha_tecnica = []
+    
+    def safe_float(val):
+        try: return float(str(val).replace(',', '')) if pd.notna(val) and str(val).strip() not in ("", "nan", "None") else 0.0
+        except: return 0.0
+
+    def safe_int(val):
+        try: return int(float(str(val).replace(',', ''))) if pd.notna(val) and str(val).strip() not in ("", "nan", "None") else 0
+        except: return 0
+    
+    for index, row in df.iterrows():
+        raw_parte = row.get(col_parte, '')
+        if pd.isna(raw_parte): continue
+        
+        no_parte = str(raw_parte).strip()
+        # Reparar bug de decimales de Pandas (ej. 1234.0 -> 1234)
+        if no_parte.endswith('.0'): no_parte = no_parte[:-2]
+            
+        # Omitimos filas vacías o la fila de cabeceras coreanas
+        if not no_parte or no_parte.lower() in ('nan', 'none', '') or 'PARTE' in no_parte or '품번' in no_parte:
+            continue
+            
+        parte_data = {
+            "parte_id": no_parte,
+            "descripcion": str(row.get(col_desc, '')).strip(),
+            "linea": str(row.get(col_line, '')).strip(),
+            "modelo": str(row.get(col_model, '')).strip(),
+            "cliente": str(row.get(col_cliente, '')).strip(),
+            "id1": str(row.get(col_id1, '')).strip(),
+            "id2": str(row.get(col_id2, '')).strip(),
+            "resina": str(row.get(col_resina, '')).strip(),
+            "densidad": safe_float(row.get(col_dens)),
+            "peso_seco": safe_float(row.get(col_seco)),
+            "peso_humedo": safe_float(row.get(col_humedo)),
+            "material_usd": safe_float(row.get(col_mat)),
+            "total_usd": safe_float(row.get(col_tot)),
+            "equipo_type": str(row.get(col_type, '')).strip(),
+            "molde": str(row.get(col_mold, '')).strip(),
+            "cavidades": safe_int(row.get(col_cav)),
+            "ciclo": safe_float(row.get(col_ciclo))
+        }
+        
+        # Limpieza final de celdas vacías
+        for key in parte_data:
+            if str(parte_data[key]).lower() in ("nan", "none", ""):
+                parte_data[key] = None
+
+        partes_ficha_tecnica.append(parte_data)
+        
+    return partes_ficha_tecnica
+
+
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 def parse_excel(path: str, fecha_plan: Optional[date] = None) -> dict:
     """Parsea todas las hojas del Excel y devuelve un dict completo."""

@@ -36,7 +36,15 @@ def importar_bom(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
     insertados = 0
     errores = []
 
+    # Deduplicar registros del mismo archivo (tomando el último) para evitar colisiones
+    registros_unicos = {}
     for r in registros:
+        pt_no = r.get("pt_no_parte")
+        comp_no = r.get("comp_no_parte")
+        if pt_no and comp_no:
+            registros_unicos[(pt_no, comp_no)] = r
+
+    for r in registros_unicos.values():
         try:
             pt = _upsert_parte(db, r["pt_no_parte"], {
                 "descripcion": r.get("pt_desc"),
@@ -60,6 +68,8 @@ def importar_bom(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
                     pt_parte_id=pt.id, comp_parte_id=comp.id,
                     linea=r.get("linea"), modelo=r.get("modelo"),
                     pt_desc=r.get("pt_desc"), comp_desc=r.get("comp_desc"),
+                    pt_no_parte=r.get("pt_no_parte"),
+                    comp_no_parte=r.get("comp_no_parte"),
                     qty_bom=r.get("qty_bom"), id1=r.get("id1")
                 )
                 db.add(item)
@@ -67,6 +77,7 @@ def importar_bom(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
                 item.qty_bom = r.get("qty_bom")
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error BOM PT:{r.get('pt_no_parte')}: {e}")
 
     return insertados, errores
@@ -77,7 +88,13 @@ def importar_inventario(db: Session, registros: list[dict]) -> tuple[int, list[s
     insertados = 0
     errores = []
 
+    # Deduplicar por número de parte para evitar colisiones
+    registros_unicos = {}
     for r in registros:
+        if r.get("no_parte"):
+            registros_unicos[r["no_parte"]] = r
+
+    for r in registros_unicos.values():
         try:
             parte = _upsert_parte(db, r["no_parte"], {
                 "descripcion": r.get("descripcion"),
@@ -102,6 +119,7 @@ def importar_inventario(db: Session, registros: list[dict]) -> tuple[int, list[s
                 inv.fecha_actualizacion = date.today()
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error INV {r.get('no_parte')}: {e}")
 
     return insertados, errores
@@ -134,6 +152,7 @@ def importar_plan(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
                 plan.cantidad_plan = r.get("cantidad_plan", 0)
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error PLAN {r.get('no_parte')}: {e}")
 
     return insertados, errores
@@ -164,6 +183,7 @@ def importar_cambios(db: Session, registros: list[dict]) -> tuple[int, list[str]
                 cambio.parte_id = parte.id if parte else None
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error CAMBIO {r.get('maquina')}: {e}")
 
     return insertados, errores
@@ -192,6 +212,7 @@ def importar_maquinas(db: Session, registros: list[dict]) -> tuple[int, list[str
                 maq.parte_id = parte.id if parte else None
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error MAQUINA {r.get('maquina_nombre')}: {e}")
 
     return insertados, errores
@@ -220,9 +241,109 @@ def importar_cortes(db: Session, registros: list[dict]) -> tuple[int, list[str]]
                 corte.parte_id = parte.id if parte else None
             insertados += 1
         except Exception as e:
+            db.rollback()
             errores.append(f"Error CORTE {r.get('no_parte_raw')}: {e}")
 
     return insertados, errores
+
+
+# ── IMPORTAR FICHA TÉCNICA (NUEVO) ────────────────────────────────────────────
+def importar_ficha_tecnica(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
+    insertados = 0
+    errores = []
+
+    for r in registros:
+        try:
+            no_parte = r.get("parte_id")
+            if not no_parte:
+                continue
+
+            parte = db.query(Parte).filter(Parte.no_parte == no_parte).first()
+            if parte:
+                parte.resina = r.get("resina", parte.resina)
+                parte.densidad = r.get("densidad", parte.densidad)
+                parte.peso_kg = r.get("peso", parte.peso_kg)
+                parte.molde = r.get("molde", parte.molde)
+                parte.cavidades = r.get("cavidades", parte.cavidades)
+                parte.ciclo = r.get("ciclo", parte.ciclo)
+            else:
+                parte = Parte(
+                    no_parte=no_parte,
+                    resina=r.get("resina"),
+                    densidad=r.get("densidad"),
+                    peso_kg=r.get("peso"),
+                    molde=r.get("molde"),
+                    cavidades=r.get("cavidades"),
+                    ciclo=r.get("ciclo")
+                )
+                db.add(parte)
+                db.flush()
+            insertados += 1
+        except Exception as e:
+            db.rollback()
+            errores.append(f"Error FICHA TÉCNICA {r.get('parte_id')}: {e}")
+
+    return insertados, errores
+
+
+# ── IMPORTAR BOM INTERNO (FICHA TÉCNICA EXCEL/CSV) ────────────────────────────
+def importar_bom_interno(db: Session, file_path_or_bytes):
+    from app.services.excel_parser import parse_bom_interno
+    datos_partes = parse_bom_interno(file_path_or_bytes)
+    
+    registros_actualizados = 0
+    registros_nuevos = 0
+    
+    for data in datos_partes:
+        parte_existente = db.query(Parte).filter(Parte.no_parte == data['parte_id']).first()
+        
+        if parte_existente:
+            # Autoridad absoluta a la Ficha Técnica: Machaca los textos del cliente sin piedad
+            parte_existente.descripcion = data.get('descripcion') if data.get('descripcion') else parte_existente.descripcion
+            parte_existente.linea = data.get('linea') if data.get('linea') else parte_existente.linea
+            parte_existente.modelo = data.get('modelo') if data.get('modelo') else parte_existente.modelo
+            
+            parte_existente.cliente = data.get('cliente')
+            parte_existente.id1 = data.get('id1')
+            parte_existente.id2 = data.get('id2')
+            parte_existente.peso_seco = data.get('peso_seco')
+            parte_existente.peso_humedo = data.get('peso_humedo')
+            parte_existente.material_usd = data.get('material_usd')
+            parte_existente.total_usd = data.get('total_usd')
+            parte_existente.equipo_type = data.get('equipo_type')
+            
+            parte_existente.resina = data.get('resina')
+            parte_existente.densidad = data.get('densidad')
+            parte_existente.molde = data.get('molde')
+            parte_existente.cavidades = data.get('cavidades')
+            parte_existente.ciclo = data.get('ciclo')
+            registros_actualizados += 1
+        else:
+            nueva_parte = Parte(
+                no_parte=data['parte_id'],
+                descripcion=data.get('descripcion'),
+                linea=data.get('linea'),
+                modelo=data.get('modelo'),
+                cliente=data.get('cliente'),
+                id1=data.get('id1'),
+                id2=data.get('id2'),
+                peso_seco=data.get('peso_seco'),
+                peso_humedo=data.get('peso_humedo'),
+                material_usd=data.get('material_usd'),
+                total_usd=data.get('total_usd'),
+                equipo_type=data.get('equipo_type'),
+                resina=data['resina'],
+                densidad=data['densidad'],
+                molde=data['molde'],
+                cavidades=data['cavidades'],
+                ciclo=data['ciclo']
+            )
+            db.add(nueva_parte)
+            db.flush()
+            registros_nuevos += 1
+            
+    db.commit()
+    return {"total_procesados": len(datos_partes), "actualizados": registros_actualizados, "nuevos": registros_nuevos}
 
 
 # ── ORQUESTADOR PRINCIPAL ────────────────────────────────────────────────────
@@ -258,6 +379,10 @@ def importar_todo(db: Session, parsed: dict, nombre_archivo: str) -> ImportLog:
         log.filas_cortes = n_cortes
         todos_errores.extend(err)
 
+        n_ficha, err = importar_ficha_tecnica(db, parsed.get("ficha_tecnica", []))
+        log.filas_ficha_tecnica = n_ficha
+        todos_errores.extend(err)
+
         # Estatus y Logs
         if todos_errores:
             log.errores = "\n".join(todos_errores[:50])  # máx 50 errores en log para no saturar DB
@@ -269,7 +394,7 @@ def importar_todo(db: Session, parsed: dict, nombre_archivo: str) -> ImportLog:
         db.commit()
         db.refresh(log)
         
-        logger.info(f"Importación {nombre_archivo}: BOM={n_bom}, INV={n_inv}, PLAN={n_plan}, CAM={n_cam}, MAQ={n_maq}, CORTES={n_cortes}")
+        logger.info(f"Importación {nombre_archivo}: BOM={n_bom}, INV={n_inv}, PLAN={n_plan}, CAM={n_cam}, MAQ={n_maq}, CORTES={n_cortes}, FICHA={n_ficha}")
 
     except Exception as e:
         db.rollback()

@@ -49,38 +49,76 @@ router_bom = APIRouter(prefix="/bom", tags=["BOM / Lista de Materiales"])
 
 @router_bom.get("/", response_model=list[BOMItemOut])
 def listar_bom(
-    linea: Optional[str] = None,
-    modelo: Optional[str] = None,
     busqueda: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 300,
+    linea: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    q = db.query(BOMItem)
+    # Un Left Join desde Parte garantiza que el Catálogo Maestro (BOMCW) es la base.
+    query = db.query(Parte, BOMItem).outerjoin(BOMItem, Parte.no_parte == BOMItem.comp_no_parte)
+    
     if linea:
-        q = q.filter(BOMItem.linea == linea)
-    if modelo:
-        q = q.filter(BOMItem.modelo.ilike(f"%{modelo}%"))
+        query = query.filter(Parte.linea == linea)
     if busqueda:
-        q = q.filter(
-            BOMItem.pt_desc.ilike(f"%{busqueda}%") |
-            BOMItem.comp_desc.ilike(f"%{busqueda}%")
+        query = query.filter(
+            Parte.no_parte.ilike(f"%{busqueda}%") |
+            Parte.descripcion.ilike(f"%{busqueda}%") |
+            BOMItem.pt_no_parte.ilike(f"%{busqueda}%")
         )
-    items = q.offset(skip).limit(limit).all()
-    # Enriquecer con no_parte
-    result = []
-    for item in items:
-        d = BOMItemOut.model_validate(item)
-        if item.parte_terminada:
-            d.pt_no_parte = item.parte_terminada.no_parte
-        if item.componente:
-            d.comp_no_parte = item.componente.no_parte
-        result.append(d)
-    return result
+        
+    resultados = query.all()
+    
+    bom_completo = []
+    for parte, bom_item in resultados:
+        p_id = parte.id if parte else (bom_item.id + 500000)
+        
+        # Damos autoridad absoluta al catálogo (Parte / BOMCW)
+        p_linea = parte.linea if (parte and parte.linea) else (bom_item.linea if bom_item else "EXT")
+        p_modelo = parte.modelo if (parte and parte.modelo) else (bom_item.modelo if bom_item else "")
+        p_desc = parte.descripcion if (parte and parte.descripcion) else (bom_item.comp_desc if bom_item else "—")
+        p_no_parte = parte.no_parte if parte else (bom_item.comp_no_parte if bom_item else "—")
+        
+        item_dict = {
+            "id": bom_item.id if bom_item else (p_id + 1000000),
+            "linea": p_linea,
+            "modelo": p_modelo,
+            "pt_parte_id": bom_item.pt_parte_id if bom_item else None,
+            "pt_desc": bom_item.pt_desc if bom_item else "— (Ficha técnica independiente)",
+            "comp_parte_id": bom_item.comp_parte_id if bom_item else p_id,
+            
+            # ── CORRECCIÓN AQUÍ: Mandamos directo la variable con autoridad ──
+            "comp_desc": p_desc, 
+            "comp_no_parte": p_no_parte, 
+            # ─────────────────────────────────────────────────────────────────
+            
+            "qty_bom": bom_item.qty_bom if bom_item else 1.0,
+            
+            # Prioridad de IDs internos
+            "id1": parte.id1 if (parte and parte.id1) else (bom_item.id1 if bom_item else None),
+            "pt_no_parte": bom_item.pt_no_parte if bom_item else "SIN PADRE",
+            
+            "molde": parte.molde if parte else None,
+            "ciclo": parte.ciclo if parte else None,
+            "cavidades": parte.cavidades if parte else None,
+            "peso_kg": parte.peso_kg if parte else None,
+            "resina": parte.resina if parte else None,
+            "densidad": parte.densidad if parte else None,
+            
+            # Nuevos datos de costos y pesos
+            "cliente": parte.cliente if parte else None,
+            "id2": parte.id2 if parte else None,
+            "peso_seco": parte.peso_seco if parte else None,
+            "peso_humedo": parte.peso_humedo if parte else None,
+            "material_usd": parte.material_usd if parte else None,
+            "total_usd": parte.total_usd if parte else None,
+            "equipo_type": parte.equipo_type if parte else None,
+        }
+        bom_completo.append(item_dict)
+
+    return bom_completo
 
 @router_bom.get("/lineas/", response_model=list[str])
 def lineas_bom(db: Session = Depends(get_db)):
-    rows = db.query(BOMItem.linea).distinct().filter(BOMItem.linea.isnot(None)).all()
+    rows = db.query(Parte.linea).distinct().filter(Parte.linea.isnot(None), Parte.linea != "").all()
     return sorted([r[0] for r in rows])
 
 
@@ -125,8 +163,8 @@ def listar_inventario(
             no_parte=inv.parte.no_parte if inv.parte else None,
             descripcion=inv.parte.descripcion if inv.parte else None,
             linea=inv.parte.linea if inv.parte else None,
-            cantidad=inv.cantidad,
-            cantidad_minima=inv.cantidad_minima,
+            cantidad=inv.cantidad or 0,
+            cantidad_minima=inv.cantidad_minima or 0,
             estatus=est,
             fecha_actualizacion=inv.fecha_actualizacion,
         ))
@@ -156,8 +194,8 @@ def actualizar_inventario(
         no_parte=inv.parte.no_parte if inv.parte else None,
         descripcion=inv.parte.descripcion if inv.parte else None,
         linea=inv.parte.linea if inv.parte else None,
-        cantidad=inv.cantidad,
-        cantidad_minima=inv.cantidad_minima,
+        cantidad=inv.cantidad or 0,
+        cantidad_minima=inv.cantidad_minima or 0,
         estatus=est,
         fecha_actualizacion=inv.fecha_actualizacion,
     )
@@ -169,13 +207,13 @@ def alertas_criticas(db: Session = Depends(get_db)):
         InventarioOut(
             id=inv.id, parte_id=inv.parte_id,
             no_parte=inv.parte.no_parte, descripcion=inv.parte.descripcion,
-            linea=inv.parte.linea, cantidad=inv.cantidad,
-            cantidad_minima=inv.cantidad_minima,
+            linea=inv.parte.linea, cantidad=inv.cantidad or 0,
+            cantidad_minima=inv.cantidad_minima or 0,
             estatus=_estatus(inv.cantidad, inv.cantidad_minima),
             fecha_actualizacion=inv.fecha_actualizacion,
         )
         for inv in rows
-        if inv.cantidad < inv.cantidad_minima and inv.cantidad_minima > 0
+        if (inv.cantidad or 0) < (inv.cantidad_minima or 0) and (inv.cantidad_minima or 0) > 0
     ]
 
 
@@ -209,44 +247,63 @@ def listar_plan(
         for r in rows
     ]
 
-@router_plan.get("/agrupado/", response_model=list[PlanPorParteOut])
-def plan_agrupado(
+@router_plan.get("/agrupado/", summary="Plan Semanal Directo desde CW PLAN", response_model=list[PlanPorParteOut])
+def plan_semanal_agrupado(
     fecha_inicio: date = Query(...),
     fecha_fin: date = Query(...),
     linea: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Devuelve el plan pivoteado por parte → {fecha: cantidad}"""
-    q = db.query(PlanProduccion).join(Parte).filter(
+    # 1. Traer los datos del plan crudo guardados en el rango de fechas
+    plan_raw = db.query(PlanProduccion).filter(
         PlanProduccion.fecha >= fecha_inicio,
-        PlanProduccion.fecha <= fecha_fin,
-    )
-    if linea:
-        q = q.filter(Parte.linea == linea)
+        PlanProduccion.fecha <= fecha_fin
+    ).all()
 
-    # Agrupar en Python
-    from collections import defaultdict
-    partes: dict[int, dict] = defaultdict(lambda: {"dias": {}, "total": 0})
-    meta: dict[int, Parte] = {}
+    # 2. Traer el catálogo maestro de partes para complementar
+    partes_dict = {p.id: p for p in db.query(Parte).all()}
 
-    for row in q.all():
-        pid = row.parte_id
-        partes[pid]["dias"][str(row.fecha)] = row.cantidad_plan
-        partes[pid]["total"] += row.cantidad_plan
-        meta[pid] = row.parte
+    # 3. Agrupar y pivotear los datos por Número de Parte
+    plan_pivoteado = {}
 
-    return [
-        PlanPorParteOut(
-            parte_id=pid,
-            no_parte=meta[pid].no_parte,
-            descripcion=meta[pid].descripcion,
-            linea=meta[pid].linea,
-            modelo=meta[pid].modelo,
-            dias=data["dias"],
-            total=data["total"],
-        )
-        for pid, data in partes.items()
-    ]
+    for item in plan_raw:
+        info_parte = partes_dict.get(item.parte_id)
+        if not info_parte:
+            continue
+            
+        no_parte = info_parte.no_parte
+        if not no_parte or no_parte in ("nan", "None", ""):
+            continue
+            
+        # Respetamos el filtro por línea si el frontend lo envía
+        if linea and info_parte.linea != linea:
+            continue
+            
+        fecha_str = item.fecha.isoformat()
+        cantidad = item.cantidad_plan or 0
+        
+        if cantidad <= 0:
+            continue
+
+        if no_parte not in plan_pivoteado:
+            plan_pivoteado[no_parte] = {
+                "parte_id": item.parte_id,
+                "no_parte": no_parte,
+                "descripcion": info_parte.descripcion or "Componente EPS",
+                "linea": info_parte.linea or "EXT",
+                "modelo": info_parte.modelo or "",
+                "dias": {},
+                "total": 0
+            }
+
+        plan_pivoteado[no_parte]["dias"][fecha_str] = plan_pivoteado[no_parte]["dias"].get(fecha_str, 0) + cantidad
+        plan_pivoteado[no_parte]["total"] += cantidad
+
+    # 4. Convertir a lista y ordenar
+    resultado = list(plan_pivoteado.values())
+    resultado.sort(key=lambda x: (x["linea"] or "Z", x["no_parte"]))
+
+    return resultado
 
 @router_plan.get("/semanas/", response_model=list[int])
 def semanas_disponibles(db: Session = Depends(get_db)):
@@ -323,8 +380,8 @@ def get_kpis(db: Session = Depends(get_db)):
     total_inv = db.query(func.sum(InventarioCW.cantidad)).scalar() or 0
 
     inv_rows = db.query(InventarioCW).all()
-    criticas = sum(1 for r in inv_rows if r.cantidad == 0 and r.cantidad_minima > 0)
-    bajo_min = sum(1 for r in inv_rows if 0 < r.cantidad < r.cantidad_minima)
+    criticas = sum(1 for r in inv_rows if (r.cantidad or 0) == 0 and (r.cantidad_minima or 0) > 0)
+    bajo_min = sum(1 for r in inv_rows if 0 < (r.cantidad or 0) < (r.cantidad_minima or 0))
 
     total_bom = db.query(func.count(BOMItem.id)).scalar()
 

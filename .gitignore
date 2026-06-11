@@ -7,8 +7,8 @@ eps-frontend/.env.local
 # --- BACKEND (Python/FastAPI) ---
 eps-backend/venv/
 eps-backend/.venv*/
-eps-backend/__pycache__/
-eps-backend/*.pyc
+**/__pycache__/
+**/*.pyc
 eps-backend/.env
 eps-backend/uploads/
 

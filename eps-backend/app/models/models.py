@@ -16,6 +16,21 @@ class Parte(Base):
     peso_kg = Column(Float, nullable=True)
     resina = Column(String(30), nullable=True)   # 350, 450, ANTIFLAMA, etc.
     densidad = Column(Float, nullable=True)
+    molde = Column(String(100), nullable=True)
+    cavidades = Column(Integer, nullable=True)
+    ciclo = Column(Float, nullable=True)
+    
+    # ─── ¡NUEVOS CAMPOS DEL BOMCW! ───
+    cliente = Column(String(50), nullable=True)
+    id1 = Column(String(50), nullable=True)
+    id2 = Column(String(50), nullable=True)
+    peso_seco = Column(Float, nullable=True)
+    peso_humedo = Column(Float, nullable=True)
+    material_usd = Column(Float, nullable=True)
+    total_usd = Column(Float, nullable=True)
+    equipo_type = Column(String(50), nullable=True)
+    # ──────────────────────────────────
+    
     creado_en = Column(DateTime, server_default=func.now())
     actualizado_en = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -35,6 +50,8 @@ class BOMItem(Base):
     pt_desc = Column(String(200))
     comp_parte_id = Column(Integer, ForeignKey("partes.id"), nullable=False)
     comp_desc = Column(String(200))
+    pt_no_parte = Column(String(50), index=True, nullable=True)
+    comp_no_parte = Column(String(50), index=True, nullable=True)
     qty_bom = Column(Float, nullable=False, default=1.0)
     id1 = Column(String(20))
     creado_en = Column(DateTime, server_default=func.now())
@@ -148,5 +165,6 @@ class ImportLog(Base):
     filas_cambios = Column(Integer, default=0)
     filas_maquinas = Column(Integer, default=0) # Nuevo contador
     filas_cortes = Column(Integer, default=0)   # Nuevo contador
+    filas_ficha_tecnica = Column(Integer, default=0)
     errores = Column(Text, nullable=True)
     status = Column(String(20), default="ok")   # ok, error, parcial
