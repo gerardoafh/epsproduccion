@@ -3,6 +3,7 @@ import PlanCaptura from "./PlanCaptura";
 import PlanSemanal from "./PlanSemanal";
 import BomInternoUpload from "./BomInternoUpload";
 import BOM from "./BOM";
+import PlanDia from "./PlanDia";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const API = "http://localhost:8000";
@@ -709,57 +710,6 @@ function CambiosMolde() {
   );
 }
 
-// ─── COMPONENTE: CATÁLOGO DE MÁQUINAS (MAQ) ──────────────────────────────────
-function MaquinasView() {
-  const { data: maquinas, loading, error } = useFetch("/maquinas/");
-
-  return (
-    <div>
-      <div className="section-header" style={{ marginBottom: 16 }}>
-        <div className="section-title">Parámetros de Inyección por Máquina</div>
-        <div className="section-line" />
-      </div>
-      <div className="table-wrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Máquina</th>
-              <th>No. Parte</th>
-              <th style={{ textAlign: "center" }}>Cavidades</th>
-              <th style={{ textAlign: "right" }}>C/T Teórico (s)</th>
-              <th style={{ textAlign: "right" }}>Meta x Hr</th>
-              <th style={{ textAlign: "right" }}>Meta Turno</th>
-              <th style={{ textAlign: "right" }}>Peso Húmedo</th>
-              <th style={{ textAlign: "right" }}>Peso Seco</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>Cargando catálogo de máquinas...</td></tr>
-            ) : error ? (
-              <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--red)" }}>{error}</td></tr>
-            ) : !maquinas || maquinas.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>Sin registros de máquinas.</td></tr>
-            ) : (
-              maquinas.map(m => (
-                <tr key={m.id}>
-                  <td><span className="tag" style={{ background: "var(--surface2)", color: "var(--accent)" }}>{m.maquina_nombre || "—"}</span></td>
-                  <td className="mono" style={{ fontWeight: 500 }}>{m.no_parte_raw}</td>
-                  <td className="mono" style={{ textAlign: "center" }}>{m.cavidades || "—"}</td>
-                  <td className="mono" style={{ textAlign: "right", color: "var(--amber)" }}>{m.ciclo_teorico ? `${m.ciclo_teorico}s` : "—"}</td>
-                  <td className="mono" style={{ textAlign: "right" }}>{m.meta_hora ? m.meta_hora.toLocaleString("es-MX") : "—"}</td>
-                  <td className="mono" style={{ textAlign: "right", fontWeight: 600 }}>{m.meta_turno ? m.meta_turno.toLocaleString("es-MX") : "—"}</td>
-                  <td className="mono" style={{ textAlign: "right", color: "var(--muted)" }}>{m.peso_humedo || "—"}</td>
-                  <td className="mono" style={{ textAlign: "right", color: "var(--muted)" }}>{m.peso_seco || "—"}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 
 // ─── COMPONENTE: PLAN DE CORTES ──────────────────────────────────────────────
 function CortesView() {
@@ -817,22 +767,22 @@ function CortesView() {
 const NAVS = [
   { id: "dashboard", icon: "▦", label: "Dashboard" },
   { id: "plan",      icon: "▤", label: "Plan Semanal" }, // Existing Plan Semanal (view only)
+  { id: "maquinas",  icon: "⚙️", label: "Plan del Día" },
   { id: "captura_plan", icon: "✎", label: "Captura Plan" }, // New Capture Plan (input)
   { id: "inventario",icon: "◫", label: "Inventario CW" },
   { id: "cambios",   icon: "⟳", label: "Cambios de Molde" },
   { id: "bom",       icon: "≡", label: "BOM / Materiales" },
-  { id: "maquinas",  icon: "⚙️", label: "Máquinas (MAQ)" },
   { id: "cortes",    icon: "🔪", label: "Plan Cortes" },
 ];
 
 const PAGE_TITLES = {
   dashboard:  "Dashboard · KPIs & Alertas",
   plan:       "Plan de Producción Semanal",
+  maquinas:   "Plan del Día (Inyección)",
   captura_plan: "Captura y Gestión de Plan Diario", // Add title for the new page
   inventario: "Gestión de Inventario CW",
   cambios:    "Registro de Cambios de Molde",
   bom:        "Lista de Materiales (BOM)",
-  maquinas:   "Catálogo de Máquinas",
   cortes:     "Programa de Área de Cortes",
 };
 
@@ -881,7 +831,7 @@ export default function App() {
             {pagina === "inventario"   && <Inventario />}
             {pagina === "cambios"      && <CambiosMolde />}
             {pagina === "bom"          && <BOM />}
-            {pagina === "maquinas"     && <MaquinasView />}
+            {pagina === "maquinas"     && <PlanDia />}
             {pagina === "cortes"       && <CortesView />}
           </div>
         </main>

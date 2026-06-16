@@ -421,9 +421,47 @@ def get_kpis(db: Session = Depends(get_db)):
 # ─── CATÁLOGO DE MÁQUINAS ─────────────────────────────────────────────────────
 router_maquinas = APIRouter(prefix="/maquinas", tags=["Catálogo de Máquinas"])
 
-@router_maquinas.get("/", response_model=list[MaquinaOut])
-def listar_maquinas(db: Session = Depends(get_db)):
-    return db.query(MaquinaCatalogo).all()
+@router_maquinas.get("/")
+def listar_maquinas(fecha: date = None, turno: str = None, db: Session = Depends(get_db)):
+    q = db.query(MaquinaCatalogo, Parte).outerjoin(Parte, Parte.no_parte == MaquinaCatalogo.no_parte_raw)
+    
+    if fecha:
+        q = q.filter(MaquinaCatalogo.fecha == fecha)
+    if turno:
+        q = q.filter(MaquinaCatalogo.turno == turno)
+        
+    resultados = q.all()
+    
+    salida = []
+    for maq, parte in resultados:
+        salida.append({
+            "id": maq.id,
+            "fecha": maq.fecha,
+            "turno": maq.turno,
+            "antes_maq": maq.antes_maq or "—",
+            "actual_maq": maq.actual_maq or "—",
+            "prioridad": maq.prioridad or "—",
+            "calidad": maq.calidad or "OK",
+            "cambio": maq.cambio or "—",
+            "no_item": maq.no_item or "—",
+            "no_parte": maq.no_parte_raw,
+            "descripcion": parte.descripcion if parte else maq.descripcion_raw,
+            "modelo": parte.modelo if parte else maq.modelo_raw,
+            "linea": parte.linea if (parte and parte.linea) else "EXT",
+            
+            "resin_plano": maq.resin_plano or "—",
+            "densidad_plano": maq.densidad_plano,
+            "resin_fisico": maq.resin_fisico or "—",
+            "densidad_fisico": maq.densidad_fisico,
+            
+            "peso_humedo": maq.peso_humedo,
+            "peso_seco": maq.peso_seco,
+            "cavidades": maq.cavidades,
+            "ciclo_teorico": maq.ciclo_teorico,
+            "meta_hora": maq.meta_hora,
+            "meta_turno": maq.meta_turno,
+        })
+    return salida
 
 # ─── PLAN DE CORTES ───────────────────────────────────────────────────────────
 router_cortes = APIRouter(prefix="/cortes", tags=["Plan de Cortes"])

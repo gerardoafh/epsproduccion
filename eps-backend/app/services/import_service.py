@@ -191,31 +191,24 @@ def importar_cambios(db: Session, registros: list[dict]) -> tuple[int, list[str]
 
 # ── IMPORTAR MAQUINAS (NUEVO) ─────────────────────────────────────────────────
 def importar_maquinas(db: Session, registros: list[dict]) -> tuple[int, list[str]]:
+    if not registros:
+        return 0, []
+        
+    # Limpieza: Si el usuario sube una actualización (2), borramos el plan anterior de ese Día y Turno
+    fecha_doc = registros[0]["fecha"]
+    turno_doc = registros[0]["turno"]
+    db.query(MaquinaCatalogo).filter(
+        MaquinaCatalogo.fecha == fecha_doc, 
+        MaquinaCatalogo.turno == turno_doc
+    ).delete()
+
     insertados = 0
-    errores = []
-
     for r in registros:
-        try:
-            parte = _upsert_parte(db, r["no_parte_raw"], {})
-            
-            maq = db.query(MaquinaCatalogo).filter(
-                MaquinaCatalogo.no_parte_raw == r["no_parte_raw"],
-                MaquinaCatalogo.maquina_nombre == r["maquina_nombre"]
-            ).first()
-
-            if not maq:
-                maq = MaquinaCatalogo(parte_id=parte.id if parte else None, **r)
-                db.add(maq)
-            else:
-                for k, v in r.items():
-                    setattr(maq, k, v)
-                maq.parte_id = parte.id if parte else None
-            insertados += 1
-        except Exception as e:
-            db.rollback()
-            errores.append(f"Error MAQUINA {r.get('maquina_nombre')}: {e}")
-
-    return insertados, errores
+        maq = MaquinaCatalogo(**r)
+        db.add(maq)
+        insertados += 1
+    
+    return insertados, []
 
 
 # ── IMPORTAR PLAN DE CORTES (NUEVO) ───────────────────────────────────────────

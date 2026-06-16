@@ -53,7 +53,7 @@ export default function PlanCaptura() {
 
       return {
         ...item,
-        maquina: specs.maquina_nombre || "Mq. Alterna",
+        maquina: specs.actual_maq || "Mq. Alterna",
         cavidades,
         cicloTeorico,
         metaHora,

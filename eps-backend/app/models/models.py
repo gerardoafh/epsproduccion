@@ -117,22 +117,41 @@ class CambioMolde(Base):
 # ─── NUEVAS TABLAS PARA EL MES ────────────────────────────────────────────────
 
 class MaquinaCatalogo(Base):
-    """Parámetros de inyección y capacidades extraídos de la pestaña MAQ."""
-    __tablename__ = "maquinas_catalogo"
+    """Plan diario completo por Máquina (Extraído al 100% de la hoja MAQ)"""
+    __tablename__ = "maquina_catalogo"
 
     id = Column(Integer, primary_key=True, index=True)
-    maquina_nombre = Column(String(50), index=True) # Ej: #2400-13
-    parte_id = Column(Integer, ForeignKey("partes.id"), nullable=True)
+    fecha = Column(Date, index=True)              # <-- ¡NUEVO!
+    turno = Column(String(20), index=True)        # <-- ¡NUEVO! (DÍA o NOCHE)
+    
+    # Columnas de Control de Piso
+    antes_maq = Column(String(50), nullable=True)
+    actual_maq = Column(String(50), nullable=True)
+    prioridad = Column(String(20), nullable=True)
+    calidad = Column(String(100), nullable=True)
+    cambio = Column(String(100), nullable=True)
+    no_item = Column(String(20), nullable=True)
+    
+    # Parámetros de la Pieza
     no_parte_raw = Column(String(50), index=True)
-    cavidades = Column(Integer, nullable=True)
-    ciclo_teorico = Column(Float, nullable=True)    # C/T Teorico en Segundos
-    meta_hora = Column(Integer, nullable=True)      # Meta x Hr
-    meta_turno = Column(Integer, nullable=True)     # Meta x 12Hrs
+    descripcion_raw = Column(String(200), nullable=True)
+    modelo_raw = Column(String(100), nullable=True)
+    
+    # Especificaciones de Material y Físicos
+    resin_plano = Column(String(50), nullable=True)
+    densidad_plano = Column(Float, nullable=True)
+    resin_fisico = Column(String(50), nullable=True)
+    densidad_fisico = Column(Float, nullable=True)
+    
+    # Métricas de Inyección
     peso_humedo = Column(Float, nullable=True)
     peso_seco = Column(Float, nullable=True)
+    cavidades = Column(Integer, nullable=True)
+    ciclo_teorico = Column(Float, nullable=True)
+    meta_hora = Column(Integer, nullable=True)
+    meta_turno = Column(Integer, nullable=True)
+    
     creado_en = Column(DateTime, server_default=func.now())
-
-    parte = relationship("Parte")
 
 
 class PlanCorte(Base):

@@ -1,21 +1,21 @@
-# --- FRONTEND (React) ---
+# Frontend (React/Vite)
 eps-frontend/node_modules/
 eps-frontend/dist/
-eps-frontend/.env
-eps-frontend/.env.local
+eps-frontend/.vite/
 
-# --- BACKEND (Python/FastAPI) ---
+# Backend (Python)
 eps-backend/venv/
-eps-backend/.venv*/
-**/__pycache__/
-**/*.pyc
-eps-backend/.env
+eps-backend/__pycache__/
 eps-backend/uploads/
 
-# --- SISTEMA Y EDITORES ---
+# Environment variables (NUNCA subir a GitHub)
+eps-backend/.env
+.env
+
+# Archivos generados por el Sistema Operativo
 .DS_Store
 Thumbs.db
+
+# Configuración de IDE
 .vscode/
-.idea/
-*.suo
-*.log
+node_modules

@@ -37,8 +37,15 @@ async def upload_excel(
 
     fp = date.fromisoformat(fecha_plan) if fecha_plan else date.today()
 
+    # ─── LÓGICA DE DETECCIÓN DE TURNO POR NOMBRE DE ARCHIVO ───
+    nombre_limpio = file.filename.upper()
+    turno = "DÍA" # Por defecto
+    if " N " in nombre_limpio or " N." in nombre_limpio or "(N)" in nombre_limpio or " NOCHE" in nombre_limpio:
+        turno = "NOCHE"
+
     try:
-        parsed = parse_excel(dest, fp)
+        # Pasamos el turno detectado al parser
+        parsed = parse_excel(dest, fp, turno)
         log = importar_todo(db, parsed, file.filename)
     except Exception as e:
         raise HTTPException(500, f"Error al procesar el archivo: {e}")
